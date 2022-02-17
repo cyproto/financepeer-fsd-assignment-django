@@ -4,6 +4,7 @@ from rest_framework import exceptions
 from django.conf import settings
 from ..models import User
 
+
 class CustomJWTAuthentication(BaseAuthentication):
     def authenticate(self, request):
         authorization_header = request.headers.get('Authorization')
@@ -15,12 +16,14 @@ class CustomJWTAuthentication(BaseAuthentication):
                 access_token, settings.SECRET_KEY, algorithms=['HS256'])
 
         except jwt.ExpiredSignatureError:
-            raise exceptions.AuthenticationFailed('access_token expired')
+            raise exceptions.AuthenticationFailed('Auth token expired')
         except IndexError:
-            raise exceptions.AuthenticationFailed('Token prefix missing')
-        
+            raise exceptions.AuthenticationFailed(
+                'Auth token\'s prefix missing')
+
         user = User.objects.filter(id=payload['user_id']).first()
         if user is None:
             raise exceptions.AuthenticationFailed('User not found')
-        
+        user.is_authenticated = True
+        request.data.update({'user_id': payload['user_id']})
         return (user, None)

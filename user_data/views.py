@@ -2,13 +2,16 @@ from contextlib import closing
 from datetime import datetime, timedelta
 import json
 import re
+from django.conf import settings
 from django.db import connection
 
 from django.http import JsonResponse
 from django.core import serializers
+from user_data.auth.custom_auth import CustomJWTAuthentication
 from user_data.models import Data, User, UserData
-from user_data.serializers import GetDataSerializer, UserDataSerializer, UserSerializer
+from user_data.serializers import UserDataSerializer, UserSerializer
 from rest_framework.viewsets import GenericViewSet
+from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth.hashers import make_password, check_password
 import jwt
 import ast
@@ -35,6 +38,8 @@ class SignupView(GenericViewSet):
 class ChangePasswordView(GenericViewSet):
     http_method_names = ['put']
     serializer_class = UserSerializer
+    authentication_classes = (CustomJWTAuthentication, )
+    permission_classes = (IsAuthenticated, )
 
     def update(self, request, *args, **kwargs):
         body_unicode = request.body.decode('utf-8')
@@ -71,14 +76,15 @@ class LoginView(GenericViewSet):
         if password_validation:
             exp_date = datetime.utcnow() + timedelta(hours=24)
             token = jwt.encode({'email': body['email'], 'user_id': user.values('id')[
-                0]['id'], 'exp': exp_date}, 'MySecretKey', algorithm='HS256')
+                0]['id'], 'exp': exp_date}, settings.SECRET_KEY, algorithm='HS256')
             return JsonResponse({'token': token.decode('UTF-8')})
         return JsonResponse({'error': 'Password is incorrect'})
 
 
 class UserDataView(GenericViewSet):
     http_method_names = ['post', 'get']
-    serializer_class = GetDataSerializer
+    authentication_classes = (CustomJWTAuthentication, )
+    permission_classes = (IsAuthenticated, )
 
     def create(self, request):
         file = request.FILES['file']
@@ -87,15 +93,15 @@ class UserDataView(GenericViewSet):
         if not validation_response['is_valid']:
             return JsonResponse({'error': validation_response['message']}, status=400)
 
-        user_data = {'user_id': 13, 'name': str(
-            file) + str(datetime.now()), 'created_by': 1, 'updated_by': 1}
+        user_data = {'user_id': request.data['user_id'], 'name': str(
+            file) + str(datetime.now()), 'created_by': request.data['user_id'], 'updated_by': request.data['user_id']}
         user_data_serializer = UserDataSerializer(data=user_data)
 
         try:
             if user_data_serializer.is_valid():
                 user_data_obj = user_data_serializer.create(user_data)
             self.insert_data(
-                validation_response['file_contents'], user_data_obj.id)
+                validation_response['file_contents'], user_data_obj.id, request.data['user_id'])
         except Exception as error:
             return JsonResponse({'error': f'Failed to create records {str(error)}'}, status=500)
 
@@ -104,23 +110,23 @@ class UserDataView(GenericViewSet):
     def get(self, request):
         user_data_id = request.GET.get('id')
         if user_data_id:
-            data_objects = Data.objects.filter(user_data_id=user_data_id).order_by('id').values(
+            data_objects = Data.objects.filter(user_data_id=user_data_id, created_by=request.data['user_id']).order_by('id').values(
                 'data_user_id', 'data_id', 'data_title', 'data_body')
             return JsonResponse({
                 'data': list(data_objects)
             }, status=200)
 
         user_data_objects = UserData.objects.filter(
-            user_id=13).order_by('id').values('id', 'name', 'created_at')
+            user_id=request.data['user_id']).order_by('id').values('id', 'name', 'created_at')
         return JsonResponse({
             'data': list(user_data_objects)
         }, status=200)
 
-    def insert_data(self, contents, user_data_id):
+    def insert_data(self, contents, user_data_id, user_id):
         params = []
         for content in contents:
             params.append((user_data_id, int(content['userId']), int(content['id']), str(content['title']).replace("'", ""),
-                           str(content['body']).replace("'", ""), 'NOW()', 13, 'NOW()', 13))
+                           str(content['body']).replace("'", ""), 'NOW()', user_id, 'NOW()', user_id))
 
         values = ', '.join(map(str, params))
         sql = 'INSERT INTO data (user_data_id, data_user_id, data_id, data_title, data_body, created_at, created_by, updated_at, updated_by) VALUES {}'.format(
