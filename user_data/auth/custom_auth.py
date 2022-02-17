@@ -12,9 +12,10 @@ class CustomJWTAuthentication(BaseAuthentication):
             return None
         try:
             access_token = authorization_header.split(' ')[1]
+            if 'null' == access_token or not access_token:
+                raise exceptions.AuthenticationFailed('Auth token invalid')
             payload = jwt.decode(
                 access_token, settings.SECRET_KEY, algorithms=['HS256'])
-
         except jwt.ExpiredSignatureError:
             raise exceptions.AuthenticationFailed('Auth token expired')
         except IndexError:
@@ -25,5 +26,6 @@ class CustomJWTAuthentication(BaseAuthentication):
         if user is None:
             raise exceptions.AuthenticationFailed('User not found')
         user.is_authenticated = True
+        print(payload)
         request.data.update({'user_id': payload['user_id']})
         return (user, None)

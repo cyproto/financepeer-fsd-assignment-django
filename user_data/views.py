@@ -22,8 +22,7 @@ class SignupView(GenericViewSet):
     serializer_class = UserSerializer
 
     def create(self, request):
-        body_unicode = request.body.decode('utf-8')
-        body = json.loads(body_unicode)
+        body = request.data
         if not 'email' in body or not 'password' in body:
             return JsonResponse({'error': 'Email/Password missing'}, status=400)
 
@@ -36,14 +35,13 @@ class SignupView(GenericViewSet):
 
 
 class ChangePasswordView(GenericViewSet):
-    http_method_names = ['put']
+    http_method_names = ['put', 'options']
     serializer_class = UserSerializer
     authentication_classes = (CustomJWTAuthentication, )
     permission_classes = (IsAuthenticated, )
 
     def update(self, request, *args, **kwargs):
-        body_unicode = request.body.decode('utf-8')
-        body = json.loads(body_unicode)
+        body = request.data
         if not 'password' in body:
             return JsonResponse({'error': 'Password missing'}, status=400)
 
@@ -59,11 +57,10 @@ class ChangePasswordView(GenericViewSet):
 
 
 class LoginView(GenericViewSet):
-    http_method_names = ['post']
+    http_method_names = ['post',  'options']
 
     def create(self, request):
-        body_unicode = request.body.decode('utf-8')
-        body = json.loads(body_unicode)
+        body = request.data
         if not 'email' in body or not 'password' in body:
             return JsonResponse({'error': 'Email/Password missing'}, status=400)
 
@@ -78,11 +75,11 @@ class LoginView(GenericViewSet):
             token = jwt.encode({'email': body['email'], 'user_id': user.values('id')[
                 0]['id'], 'exp': exp_date}, settings.SECRET_KEY, algorithm='HS256')
             return JsonResponse({'token': token.decode('UTF-8')})
-        return JsonResponse({'error': 'Password is incorrect'})
+        return JsonResponse({'error': 'Password is incorrect'}, status=400)
 
 
 class UserDataView(GenericViewSet):
-    http_method_names = ['post', 'get']
+    http_method_names = ['post', 'get', 'options']
     authentication_classes = (CustomJWTAuthentication, )
     permission_classes = (IsAuthenticated, )
 
@@ -110,16 +107,13 @@ class UserDataView(GenericViewSet):
     def get(self, request):
         user_data_id = request.GET.get('id')
         if user_data_id:
-            data_objects = Data.objects.filter(user_data_id=user_data_id, created_by=request.data['user_id']).order_by('id').values(
+            response = Data.objects.filter(user_data_id=user_data_id, created_by=request.data['user_id']).order_by('id').values(
                 'data_user_id', 'data_id', 'data_title', 'data_body')
-            return JsonResponse({
-                'data': list(data_objects)
-            }, status=200)
-
-        user_data_objects = UserData.objects.filter(
-            user_id=request.data['user_id']).order_by('id').values('id', 'name', 'created_at')
+        else:
+            response = UserData.objects.filter(
+                user_id=request.data['user_id']).order_by('-id').values('id', 'name', 'created_at')
         return JsonResponse({
-            'data': list(user_data_objects)
+            'data': list(response)
         }, status=200)
 
     def insert_data(self, contents, user_data_id, user_id):
@@ -155,3 +149,12 @@ class UserDataView(GenericViewSet):
                 return {'is_valid': False, 'message': 'Invalid data in file'}
 
         return {'is_valid': True, 'file_contents': file_contents}
+
+
+class ValidateTokenView(GenericViewSet):
+    http_method_names = ['post']
+    authentication_classes = (CustomJWTAuthentication, )
+    permission_classes = (IsAuthenticated, )
+
+    def create(self, request):
+        return JsonResponse({'message': 'Token is valid'}, status=200)
